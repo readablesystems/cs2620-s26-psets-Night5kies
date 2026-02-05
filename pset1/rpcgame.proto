@@ -1,4 +1,10 @@
-edition = "2023";
+syntax = "proto3";
+
+// Ubuntu system protobuf is pretty old -- version 3.21.
+// Later protobuf versions offer more optimization opportunities.
+// If `protoc --version` reports libprotoc 27 or later, then try this instead
+// of `syntax = "proto3"`:
+// edition = "2023";
 
 message TryRequest {
     string serial = 1;

@@ -5,11 +5,15 @@
 ```
 brew install grpc cmake xxhash
 cmake -B build
-(cd build; cmake --build .)
+cmake --build build
 ```
+
+If `cmake -B build` fails with message about a cache problem, try `cmake
+--fresh -B build`; or, as a last resort, `rm -rf build; cmake -B build`.
+**Do not put any source files in the `build` directory.**
 
 ## Running instructions
 
 ```
-(killall rpcg-server; build/rpcg-server&; sleep 0.5; build/rpcg-client; sleep 0.1)
+(killall rpcg-server; build/rpcg-server& sleep 0.5; build/rpcg-client; sleep 0.1)
 ```

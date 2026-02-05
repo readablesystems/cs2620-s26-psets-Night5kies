@@ -1,7 +1,10 @@
 #include <sys/mman.h>
 #include <cassert>
 #include <charconv>
+#include <chrono>
+#include <cstring>
 #include <iostream>
+#include <memory>
 #include <numeric>
 #include <sstream>
 #include <vector>

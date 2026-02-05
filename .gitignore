@@ -30,6 +30,7 @@
 .cs61tmpid
 .vscode
 a.out
+build
 cmake-build-*
 config.mk
 core*

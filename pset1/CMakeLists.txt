@@ -7,9 +7,11 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Find required packages
 find_package(Threads REQUIRED)
-find_package(Protobuf CONFIG REQUIRED)
-find_package(gRPC CONFIG REQUIRED)
-find_package(absl CONFIG REQUIRED)
+find_package(Protobuf CONFIG QUIET)
+if(NOT Protobuf_FOUND)
+    find_package(Protobuf REQUIRED)
+endif()
+find_package(gRPC REQUIRED)
 
 # Find xxhash
 find_path(XXHASH_INCLUDE_DIR xxhash.h HINTS /opt/homebrew/include)
