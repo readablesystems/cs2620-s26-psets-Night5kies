@@ -1,62 +1,77 @@
+#include <grpcpp/ext/proto_server_reflection_plugin.h>
+#include <grpcpp/grpcpp.h>
+#include <grpcpp/health_check_service_interface.h>
+
+#include "rpcgame.grpc.pb.h"
 #include "rpcgame.hh"
 
-#include <rpc/server.h>
-
-#include <chrono>
-#include <cstdint>
-#include <cstdlib>
-#include <iostream>
-#include <mutex>
-#include <string>
 #include <thread>
-#include <tuple>
 
-static std::unique_ptr<rpc::server> server_ptr;
+static std::unique_ptr<grpc::Server> server;
 
-static std::mutex g_try_mu;
 
-static inline void parse_address(const std::string& address, std::string& host_out, uint16_t& port_out) {
-    auto pos = address.rfind(':');
-    if (pos == std::string::npos) {
-        std::cerr << "Bad address (expected host:port): " << address << "\n";
-        std::exit(1);
+class RPCGameServiceImpl final : public RPCGame::Service {
+public:
+    grpc::Status Try(grpc::ServerContext* context, const TryRequest* request,
+                     TryResponse* response) {
+        // parse request
+        std::string serialstr = request->serial();
+        uint64_t serial = from_str_chars<uint64_t>(serialstr);
+        std::string name = request->name();
+        std::string countstr = request->count();
+        uint64_t count = from_str_chars<uint64_t>(countstr);
+
+        // process parameters
+        uint64_t value = server_process_try(serial, name.data(), name.size(),
+                                            count);
+
+        // construct response
+        response->set_value(std::to_string(value));
+        return grpc::Status::OK;
     }
-    host_out = address.substr(0, pos);
-    port_out = static_cast<uint16_t>(std::stoi(address.substr(pos + 1)));
-}
 
-void server_start(std::string address) {
-    std::string host;
-    uint16_t port = 0;
-    parse_address(address, host, port);
-
-    server_ptr = std::make_unique<rpc::server>(port);
-
-    server_ptr->bind("Try", [](uint64_t serial, const std::string& name, uint64_t count) -> uint64_t {
-        std::lock_guard<std::mutex> lk(g_try_mu);
-        return server_process_try(serial, name.data(), name.size(), count);
-    });
-
-    server_ptr->bind("Done", []() -> std::tuple<std::string, std::string> {
+    grpc::Status Done(grpc::ServerContext* context, const DoneRequest* request,
+                      DoneResponse* response) {
+        // calculate checksums
         std::string client_csum = client_checksum();
         std::string server_csum = server_checksum();
 
-        static std::once_flag shutdown_once;
-        std::call_once(shutdown_once, [] {
-            std::thread([] {
-                using namespace std::chrono_literals;
-                std::this_thread::sleep_for(100ms);
-                if (server_ptr) {
-                    server_ptr->close_sessions();
-                    server_ptr->stop();
-                }
-            }).detach();
+        // construct response
+        response->set_client_checksum(client_csum);
+        response->set_server_checksum(server_csum);
+
+        // shut down server after 0.5sec
+        std::thread shutdown_thread([] () {
+            using namespace std::chrono_literals;
+            std::this_thread::sleep_for(100ms);
+            server->Shutdown();
         });
+        shutdown_thread.detach();
 
-        return {std::move(client_csum), std::move(server_csum)};
-    });
+        return grpc::Status::OK;
+    }
+};
 
+void server_start(std::string address) {
+    grpc::EnableDefaultHealthCheckService(true);
+    grpc::reflection::InitProtoReflectionServerBuilderPlugin();
+
+    grpc::ServerBuilder builder;
+    // Request a compressed channel
+    builder.SetDefaultCompressionAlgorithm(GRPC_COMPRESS_GZIP);
+    // Listen on the given address without any authentication
+    builder.AddListeningPort(address, grpc::InsecureServerCredentials());
+    // Register `service` as the instance through which we'll communicate with
+    // clients
+    RPCGameServiceImpl service;
+    builder.RegisterService(&service);
+    // Finally assemble the server
+    server = builder.BuildAndStart();
     std::cout << "Server listening on " << address << "\n";
-    server_ptr->run();
+
+    // Wait for the server to shutdown. Note that some other thread must be
+    // responsible for shutting down the server for this call to ever return.
+    server->Wait();
+
     std::cout << "Server exiting\n";
 }

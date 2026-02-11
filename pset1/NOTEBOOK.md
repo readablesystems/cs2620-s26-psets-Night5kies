@@ -4,6 +4,7 @@ cmake -B build
 (cd build; cmake --build .)
 
 (killall rpcg-server; build/rpcg-server& sleep 0.5; build/rpcg-client)
+
 First, I tried setting it up myself on Windows with the help of ChatGPT, however, I was tinkering with it for a while. I then thought I had it working since I could run it, however, after trying to make a bunch of changes to it, it wasn’t rebuilding with the updated code changes that I was making. It took me a while to realize this because the performance kept varying when I ran it multiple times. I then added another line to the Done print statements that printed the maximum in_flights. When this didn’t show, I realized it wasn’t actually using updated code. Then I switched to codespaces from the instructions on the ed, and now it seems to work.
 
 Base Code Performance:
