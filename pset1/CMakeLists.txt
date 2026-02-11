@@ -13,6 +13,9 @@ if(NOT Protobuf_FOUND)
 endif()
 find_package(gRPC REQUIRED)
 
+add_subdirectory(external/rpclib)
+
+
 # Find xxhash
 find_path(XXHASH_INCLUDE_DIR xxhash.h HINTS /opt/homebrew/include)
 find_library(XXHASH_LIBRARY xxhash HINTS /opt/homebrew/lib)
@@ -84,3 +87,11 @@ target_link_libraries(rpcg-client PRIVATE
     ${XXHASH_LIBRARY}
     Threads::Threads
 )
+
+
+
+target_link_libraries(rpcg-server PRIVATE rpc)
+target_link_libraries(rpcg-client PRIVATE rpc)
+
+target_compile_features(rpcg-server PRIVATE cxx_std_17)
+target_compile_features(rpcg-client PRIVATE cxx_std_17)
