@@ -14,31 +14,33 @@ class RPCGameServiceImpl final : public RPCGame::Service {
 public:
     grpc::Status Try(grpc::ServerContext* context, const TryRequest* request,
                      TryResponse* response) {
-        // parse request
-        std::string serialstr = request->serial();
+        // parse request - use const references to avoid copies
+        const std::string& serialstr = request->serial();
         uint64_t serial = from_str_chars<uint64_t>(serialstr);
-        std::string name = request->name();
-        std::string countstr = request->count();
+        
+        const std::string& name = request->name();
+        
+        const std::string& countstr = request->count();
         uint64_t count = from_str_chars<uint64_t>(countstr);
 
         // process parameters
         uint64_t value = server_process_try(serial, name.data(), name.size(),
                                             count);
 
-        // construct response
+        // construct response - move into response
         response->set_value(std::to_string(value));
         return grpc::Status::OK;
     }
 
     grpc::Status Done(grpc::ServerContext* context, const DoneRequest* request,
                       DoneResponse* response) {
-        // calculate checksums
-        std::string client_csum = client_checksum();
-        std::string server_csum = server_checksum();
+        // calculate checksums - get references
+        const std::string& client_csum = client_checksum();
+        const std::string& server_csum = server_checksum();
 
-        // construct response
-        response->set_client_checksum(client_csum);
-        response->set_server_checksum(server_csum);
+        // construct response - use mutable accessors to avoid copy
+        *response->mutable_client_checksum() = client_csum;
+        *response->mutable_server_checksum() = server_csum;
 
         // shut down server after 0.5sec
         std::thread shutdown_thread([] () {
@@ -58,7 +60,7 @@ void server_start(std::string address) {
 
     grpc::ServerBuilder builder;
     // Request a compressed channel
-    builder.SetDefaultCompressionAlgorithm(GRPC_COMPRESS_GZIP);
+    builder.SetDefaultCompressionAlgorithm(GRPC_COMPRESS_NONE);
     // Listen on the given address without any authentication
     builder.AddListeningPort(address, grpc::InsecureServerCredentials());
     // Register `service` as the instance through which we'll communicate with

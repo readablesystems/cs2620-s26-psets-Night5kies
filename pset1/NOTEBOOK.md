@@ -11,24 +11,23 @@ Base Code Performance:
 sent 1995 RPCs per sec
 
 Modified Client to be Async and use windowing with Completion Queue:
-sent 2827 RPCs per sec
+Window size 50 - sent 3891 RPCs per sec 
+Window size 32 - sent 4043 RPCs per sec
+Window size 64 - sent 4211 RPCs per sec
+Window size 128 - sent 3490 RPCs per sec
 
-It seems that adding the Async with windowing improved the RPCs/sec quite a bit. However, the performance varies. I got worse ones around 2300 as well, but also some close to 3000. 
+It seems that adding the Async with windowing improved the RPCs/sec quite a bit. However, the performance varies. I got worse ones around 3500 as well, but also some around 4200. Out of the different window sizes, it seems like a window size of 64 did best.
 
 Copy Avoidance:
-sent 2308 RPCs per sec 
+sent 4138 RPCs per sec
 
 Similarish performance to async with windowing. I think the difference is due to the variation on a run to run basis
 
 Turned off GZIP Compression
-sent 2215 RPCs per sec
+sent 6348 RPCs per sec
 
-Didn’t make much of a difference, slightly worse if anything
+Made a pretty signifigant improvement
 
-2 Completion Queue threads, more copy avoidance, notify_one() instead of notify_all() 
-sent 2123 RPCs per sec
-
-Not much of a difference
 
 Used rpclib instead of gRPC:
 sent 31282 RPCs per sec
