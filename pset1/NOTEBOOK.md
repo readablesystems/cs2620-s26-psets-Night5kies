@@ -30,7 +30,11 @@ Made a pretty signifigant improvement
 
 
 Used rpclib instead of gRPC:
-sent 31282 RPCs per sec
+sent 30390 RPCs per sec
 
 SIGNFICANT improvement, much more than the toher things I tried.
 
+Implemented Batching:
+sent 140899 RPCs per sec
+
+Again, significant improvement

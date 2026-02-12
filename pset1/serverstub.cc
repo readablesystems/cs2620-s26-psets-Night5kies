@@ -1,79 +1,69 @@
-#include <grpcpp/ext/proto_server_reflection_plugin.h>
-#include <grpcpp/grpcpp.h>
-#include <grpcpp/health_check_service_interface.h>
+#include <rpc/server.h>
+#include <memory>
+#include <thread>
+#include <iostream>
+#include <vector>
 
-#include "rpcgame.grpc.pb.h"
 #include "rpcgame.hh"
 
-#include <thread>
+static std::unique_ptr<rpc::server> server;
 
-static std::unique_ptr<grpc::Server> server;
+// RPC handler for single Try (keep for compatibility)
+uint64_t handle_try(uint64_t serial, const std::string& name, uint64_t count) {
+    uint64_t value = server_process_try(serial, name.data(), name.size(), count);
+    return value;
+}
 
-
-class RPCGameServiceImpl final : public RPCGame::Service {
-public:
-    grpc::Status Try(grpc::ServerContext* context, const TryRequest* request,
-                     TryResponse* response) {
-        // parse request - use const references to avoid copies
-        const std::string& serialstr = request->serial();
-        uint64_t serial = from_str_chars<uint64_t>(serialstr);
-        
-        const std::string& name = request->name();
-        
-        const std::string& countstr = request->count();
-        uint64_t count = from_str_chars<uint64_t>(countstr);
-
-        // process parameters
-        uint64_t value = server_process_try(serial, name.data(), name.size(),
-                                            count);
-
-        // construct response - move into response
-        response->set_value(std::to_string(value));
-        return grpc::Status::OK;
+// RPC handler for batched Try
+std::vector<uint64_t> handle_try_batch(const std::vector<uint64_t>& serials,
+                                        const std::vector<std::string>& names,
+                                        const std::vector<uint64_t>& counts) {
+    std::vector<uint64_t> results;
+    results.reserve(serials.size());
+    
+    for (size_t i = 0; i < serials.size(); ++i) {
+        uint64_t value = server_process_try(serials[i], names[i].data(), 
+                                            names[i].size(), counts[i]);
+        results.push_back(value);
     }
+    
+    return results;
+}
 
-    grpc::Status Done(grpc::ServerContext* context, const DoneRequest* request,
-                      DoneResponse* response) {
-        // calculate checksums - get references
-        const std::string& client_csum = client_checksum();
-        const std::string& server_csum = server_checksum();
+// RPC handler for Done
+std::tuple<std::string, std::string> handle_done() {
+    // calculate checksums
+    const std::string& client_csum = client_checksum();
+    const std::string& server_csum = server_checksum();
 
-        // construct response - use mutable accessors to avoid copy
-        *response->mutable_client_checksum() = client_csum;
-        *response->mutable_server_checksum() = server_csum;
+    // shut down server after 100ms
+    std::thread shutdown_thread([] () {
+        using namespace std::chrono_literals;
+        std::this_thread::sleep_for(100ms);
+        server->stop();
+    });
+    shutdown_thread.detach();
 
-        // shut down server after 0.5sec
-        std::thread shutdown_thread([] () {
-            using namespace std::chrono_literals;
-            std::this_thread::sleep_for(100ms);
-            server->Shutdown();
-        });
-        shutdown_thread.detach();
-
-        return grpc::Status::OK;
-    }
-};
+    return std::make_tuple(client_csum, server_csum);
+}
 
 void server_start(std::string address) {
-    grpc::EnableDefaultHealthCheckService(true);
-    grpc::reflection::InitProtoReflectionServerBuilderPlugin();
+    // Parse address as "host:port"
+    size_t colon_pos = address.find(':');
+    uint16_t port = std::stoi(address.substr(colon_pos + 1));
 
-    grpc::ServerBuilder builder;
-    // Request a compressed channel
-    builder.SetDefaultCompressionAlgorithm(GRPC_COMPRESS_NONE);
-    // Listen on the given address without any authentication
-    builder.AddListeningPort(address, grpc::InsecureServerCredentials());
-    // Register `service` as the instance through which we'll communicate with
-    // clients
-    RPCGameServiceImpl service;
-    builder.RegisterService(&service);
-    // Finally assemble the server
-    server = builder.BuildAndStart();
+    // Create server - bind to all interfaces (0.0.0.0)
+    server = std::make_unique<rpc::server>(port);
+    
+    // Bind RPC functions
+    server->bind("Try", &handle_try);
+    server->bind("TryBatch", &handle_try_batch);
+    server->bind("Done", &handle_done);
+    
     std::cout << "Server listening on " << address << "\n";
-
-    // Wait for the server to shutdown. Note that some other thread must be
-    // responsible for shutting down the server for this call to ever return.
-    server->Wait();
-
+    
+    // Run server (blocks until stopped)
+    server->run();
+    
     std::cout << "Server exiting\n";
 }

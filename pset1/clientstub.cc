@@ -1,40 +1,47 @@
-#include <grpcpp/grpcpp.h>
-#include <memory>
+#include <rpc/client.h>
 #include <map>
+#include <memory>
+#include <future>
+#include <iostream>
+#include <vector>
 
-#include "rpcgame.grpc.pb.h"
 #include "rpcgame.hh"
 
 class RPCGameClient {
 public:
-    RPCGameClient(std::shared_ptr<grpc::Channel> channel, size_t window_size = 128)
-        : _stub(RPCGame::NewStub(channel)), _window_size(window_size) {
+    RPCGameClient(const std::string& address, uint16_t port, size_t window_size = 50, size_t batch_size = 10)
+        : _client(address, port), _window_size(window_size), _batch_size(batch_size) {
+        _client.set_timeout(30000);  // 30 second timeout
     }
 
     void send_try(const char* name, size_t name_len, uint64_t count) {
-        // Wait if window is full
-        while (_in_flight >= _window_size) {
-            process_one_response();
-        }
-
-        // Construct request with move semantics
-        auto call = new TryCall();
-        call->serial = _serial;
-        call->request.set_serial(std::to_string(_serial));  // unavoidable for number->string
-        call->request.set_name(name, name_len);  // direct set with pointer and length
-        call->request.set_count(std::to_string(count));  // unavoidable for number->string
+        // Add to batch
+        BatchedRequest req;
+        req.serial = _serial;
+        req.name = std::string(name, name_len);
+        req.count = count;
+        _current_batch.push_back(std::move(req));
         ++_serial;
 
-        // Send async request
-        call->rpc = _stub->AsyncTry(&call->context, call->request, &_cq);
-        call->rpc->Finish(&call->response, &call->status, (void*)call);
-        
-        ++_in_flight;
+        // Flush if batch is full
+        if (_current_batch.size() >= _batch_size) {
+            flush_batch();
+        }
+
+        // Wait if window is full
+        while (_in_flight_batches >= _window_size) {
+            process_one_response();
+        }
     }
 
     void finish() {
+        // Flush any remaining batch
+        if (!_current_batch.empty()) {
+            flush_batch();
+        }
+
         // Wait for all in-flight requests to complete
-        while (_in_flight > 0) {
+        while (_in_flight_batches > 0) {
             process_one_response();
         }
 
@@ -42,21 +49,14 @@ public:
         deliver_buffered_responses();
 
         // Now send Done request
-        grpc::ClientContext context;
-        DoneResponse response;
-        grpc::Status status = _stub->Done(&context, DoneRequest(), &response);
+        auto result = _client.call("Done").as<std::tuple<std::string, std::string>>();
         
-        if (!status.ok()) {
-            std::cerr << status.error_code() << ": " << status.error_message()
-                << "\n";
-            exit(1);
-        }
-
-        // Parse response - use const references to avoid copies
+        const std::string& resp_client_checksum = std::get<0>(result);
+        const std::string& resp_server_checksum = std::get<1>(result);
+        
+        // Parse response
         const std::string& my_client_checksum = client_checksum();
         const std::string& my_server_checksum = server_checksum();
-        const std::string& resp_client_checksum = response.client_checksum();
-        const std::string& resp_server_checksum = response.server_checksum();
         
         bool ok = my_client_checksum == resp_client_checksum
             && my_server_checksum == resp_server_checksum;
@@ -68,46 +68,65 @@ public:
     }
 
 private:
-    struct TryCall {
-        grpc::ClientContext context;
-        TryRequest request;
-        TryResponse response;
-        grpc::Status status;
-        std::unique_ptr<grpc::ClientAsyncResponseReader<TryResponse>> rpc;
+    struct BatchedRequest {
         uint64_t serial;
+        std::string name;
+        uint64_t count;
     };
 
-    void process_one_response() {
-        void* tag;
-        bool ok = false;
+    struct BatchInfo {
+        std::vector<uint64_t> serials;
+        std::future<RPCLIB_MSGPACK::object_handle> future;
+    };
+
+    void flush_batch() {
+        if (_current_batch.empty()) {
+            return;
+        }
+
+        // Prepare batch data
+        std::vector<uint64_t> serials;
+        std::vector<std::string> names;
+        std::vector<uint64_t> counts;
+
+        for (const auto& req : _current_batch) {
+            serials.push_back(req.serial);
+            names.push_back(req.name);
+            counts.push_back(req.count);
+        }
+
+        // Send async batch request
+        auto future = _client.async_call("TryBatch", serials, names, counts);
         
-        // Block until next result is available
-        if (!_cq.Next(&tag, &ok)) {
-            std::cerr << "Completion queue shutdown unexpectedly\n";
-            exit(1);
+        BatchInfo batch_info;
+        batch_info.serials = std::move(serials);
+        batch_info.future = std::move(future);
+        
+        _pending_batches.push_back(std::move(batch_info));
+        ++_in_flight_batches;
+        
+        _current_batch.clear();
+    }
+
+    void process_one_response() {
+        if (_pending_batches.empty()) {
+            return;
         }
 
-        if (!ok) {
-            std::cerr << "Request failed\n";
-            exit(1);
+        // Get the oldest batch
+        auto& batch_info = _pending_batches.front();
+        
+        // Wait for this batch response
+        auto values = batch_info.future.get().template as<std::vector<uint64_t>>();
+        
+        // Buffer all responses from this batch
+        for (size_t i = 0; i < batch_info.serials.size(); ++i) {
+            _buffered_responses[batch_info.serials[i]] = values[i];
         }
-
-        // Retrieve and take ownership of the call
-        std::unique_ptr<TryCall> call(static_cast<TryCall*>(tag));
-        --_in_flight;
-
-        if (!call->status.ok()) {
-            std::cerr << call->status.error_code() << ": " 
-                << call->status.error_message() << "\n";
-            exit(1);
-        }
-
-        // Parse response - use const reference to avoid copy
-        const std::string& valuestr = call->response.value();
-        uint64_t value = from_str_chars<uint64_t>(valuestr);
-
-        // Buffer the response with its serial number
-        _buffered_responses[call->serial] = value;
+        
+        // Remove from pending
+        _pending_batches.pop_front();
+        --_in_flight_batches;
 
         // Deliver responses in order
         deliver_buffered_responses();
@@ -128,12 +147,14 @@ private:
         }
     }
 
-    std::unique_ptr<RPCGame::Stub> _stub;
-    grpc::CompletionQueue _cq;
+    rpc::client _client;
     uint64_t _serial = 1;
     uint64_t _next_expected_serial = 1;
     size_t _window_size;
-    size_t _in_flight = 0;
+    size_t _batch_size;
+    size_t _in_flight_batches = 0;
+    std::vector<BatchedRequest> _current_batch;
+    std::deque<BatchInfo> _pending_batches;
     std::map<uint64_t, uint64_t> _buffered_responses;  // serial -> value
 };
 
@@ -142,14 +163,12 @@ static std::unique_ptr<RPCGameClient> client;
 
 
 void client_connect(std::string address) {
-    // Request a compressed channel
-    grpc::ChannelArguments args;
-    args.SetCompressionAlgorithm(GRPC_COMPRESS_NONE);
+    // Parse address as "host:port"
+    size_t colon_pos = address.find(':');
+    std::string host = address.substr(0, colon_pos);
+    uint16_t port = std::stoi(address.substr(colon_pos + 1));
     
-    // Create client with window size of 50 (adjust as needed)
-    client = std::make_unique<RPCGameClient>(
-        grpc::CreateCustomChannel(address, grpc::InsecureChannelCredentials(), args),
-        50);  // window size parameter
+    client = std::make_unique<RPCGameClient>(host, port, 50, 10);  // window=50, batch=10
 }
 
 void client_send_try(const char* name, size_t name_len, uint64_t count) {
