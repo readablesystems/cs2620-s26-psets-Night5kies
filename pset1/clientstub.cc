@@ -9,7 +9,7 @@
 
 class RPCGameClient {
 public:
-    RPCGameClient(const std::string& address, uint16_t port, size_t window_size = 50, size_t batch_size = 10)
+    RPCGameClient(const std::string& address, uint16_t port, size_t window_size = 32, size_t batch_size = 128)
         : _client(address, port), _window_size(window_size), _batch_size(batch_size) {
         _client.set_timeout(30000);  // 30 second timeout
     }

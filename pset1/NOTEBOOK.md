@@ -35,6 +35,6 @@ sent 30390 RPCs per sec
 SIGNFICANT improvement, much more than the toher things I tried.
 
 Implemented Batching:
-sent 140899 RPCs per sec
+sent 142557 RPCs per sec
 
-Again, significant improvement
+Again, significant improvement Went with a batch size of 128, others had similar performance and was hard to tell what was best since they were all very similar because of the varaince
