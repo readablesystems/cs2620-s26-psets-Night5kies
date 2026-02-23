@@ -6,19 +6,32 @@
 #include "rpcgame.hh"
 
 #include <thread>
+#include <type_traits>
 
 static std::unique_ptr<grpc::Server> server;
 
+// Convert unsigned integer to chars and set protobuf string field without heap allocation.
+template <class UInt, class Setter>
+inline void set_uint_as_string(Setter&& set_fn, UInt v) {
+    static_assert(std::is_unsigned_v<UInt>, "Use unsigned integer types here.");
+    char buf[32]; // enough for uint64_t
+    auto [ptr, ec] = std::to_chars(buf, buf + sizeof(buf), v);
+    if (ec != std::errc{}) {
+        std::cerr << "to_chars failed\n";
+        std::exit(1);
+    }
+    set_fn(buf, static_cast<size_t>(ptr - buf));
+}
 
 class RPCGameServiceImpl final : public RPCGame::Service {
 public:
     grpc::Status Try(grpc::ServerContext* context, const TryRequest* request,
                      TryResponse* response) {
         // parse request
-        std::string serialstr = request->serial();
+        const std::string& serialstr = request->serial();
         uint64_t serial = from_str_chars<uint64_t>(serialstr);
-        std::string name = request->name();
-        std::string countstr = request->count();
+        const std::string& name = request->name();
+        const std::string& countstr = request->count();
         uint64_t count = from_str_chars<uint64_t>(countstr);
 
         // process parameters
@@ -26,7 +39,7 @@ public:
                                             count);
 
         // construct response
-        response->set_value(std::to_string(value));
+        set_uint_as_string([&](const char* p, size_t n) { response->set_value(p, n); }, value);
         return grpc::Status::OK;
     }
 
@@ -58,7 +71,7 @@ void server_start(std::string address) {
 
     grpc::ServerBuilder builder;
     // Request a compressed channel
-    builder.SetDefaultCompressionAlgorithm(GRPC_COMPRESS_GZIP);
+    builder.SetDefaultCompressionAlgorithm(GRPC_COMPRESS_NONE); // Disable compression for server channel
     // Listen on the given address without any authentication
     builder.AddListeningPort(address, grpc::InsecureServerCredentials());
     // Register `service` as the instance through which we'll communicate with
