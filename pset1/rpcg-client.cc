@@ -11,6 +11,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include "rpcgame.hh"
+#include <chrono>
+#include <cstring>
 
 using steady_time_point = std::chrono::time_point<std::chrono::steady_clock>;
 
