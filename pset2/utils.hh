@@ -1,9 +1,14 @@
 #pragma once
+#include <array>
 #include <charconv>
 #include <random>
 #include <string>
 #include <system_error>
+#ifdef _WIN32
+#include "detail/getopt_win.h"
+#else
 #include <getopt.h>
+#endif
 
 // - perform std::from_chars on `s`; all of `s` must be parsed
 template <typename T>

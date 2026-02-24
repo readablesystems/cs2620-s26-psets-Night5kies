@@ -3,7 +3,11 @@
 #include "ctconsensus_msgs.hh"
 #include <list>
 #include <print>
+#ifdef _WIN32
+#include "detail/getopt_win.h"
+#else
 #include <getopt.h>
+#endif
 
 namespace cot = cotamer;
 using namespace std::chrono_literals;

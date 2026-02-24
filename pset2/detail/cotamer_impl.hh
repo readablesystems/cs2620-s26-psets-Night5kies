@@ -274,7 +274,7 @@ struct event_body {
 struct quorum_event_body : event_body {
     template<typename... Es>
     quorum_event_body(size_t quorum, Es&&... es)
-        : quorum_(quorum) {
+        : quorum_(static_cast<uint32_t>(quorum)) {
         flags_ |= f_quorum;
         (add_member(std::forward<Es>(es)), ...);
         if (triggered_ >= quorum_) {
