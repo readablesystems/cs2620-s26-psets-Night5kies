@@ -150,9 +150,10 @@ cot::task<> server::consensus() {
             while (received_prepare <= N_ / 2) {
                 auto m = co_await receive(m_prepare);
                 ++received_prepare;
-                // maybe update color
+                // maybe update color based on PREPAREs
                 if (m.color_round > color_round_) {
                     color_ = m.color;
+                    // drop update of color_round_ here
                     color_round_ = m.color_round;
                 }
             }
@@ -180,7 +181,9 @@ cot::task<> server::consensus() {
             break;
         } else if (maybe_propose) {
             color_ = maybe_propose->color;
-            color_round_ = round_;
+            // omit color_round update here as well - we will just use
+            // the current round when needed
+            // color_round_ = round_;  // original version
         }
         co_await net_.link(id_, leader).send(
             ack_message(round_, (bool) maybe_propose)
@@ -398,5 +401,5 @@ int main(int argc, char* argv[]) {
     } else {
         ok = try_one_seed(net, first_seed);
     }
-    return ok ? EXIT_SUCCESS : EXIT_FAILURE;
+    return ok ? 0 : 1;
 }

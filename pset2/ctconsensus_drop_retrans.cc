@@ -180,7 +180,7 @@ cot::task<> server::consensus() {
             break;
         } else if (maybe_propose) {
             color_ = maybe_propose->color;
-            color_round_ = round_;
+            color_round_ = round_;  // update color round on propose
         }
         co_await net_.link(id_, leader).send(
             ack_message(round_, (bool) maybe_propose)
@@ -215,11 +215,11 @@ cot::task<> server::consensus() {
     auto decide = decide_message(color_);
     // send DECIDE to Nancy
     co_await net_.link(id_, nancy_id).send(decide);
-    // send DECIDE to everyone else
-    for (int j = 0; j != N_; ++j) {
-        if (j != id_) {
-            co_await net_.link(id_, j).send(decide);
-        }
+    // Send DECIDE to only one peer (our successor) instead of everyone.
+    // This reduces chatter while still allowing limited retransmission.
+    int successor = (id_ + 1) % N_;
+    if (successor != id_) {
+        co_await net_.link(id_, successor).send(decide);
     }
 }
 
@@ -398,5 +398,5 @@ int main(int argc, char* argv[]) {
     } else {
         ok = try_one_seed(net, first_seed);
     }
-    return ok ? EXIT_SUCCESS : EXIT_FAILURE;
+    return ok ? 0 : 1;
 }

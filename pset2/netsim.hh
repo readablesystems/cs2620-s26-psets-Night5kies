@@ -49,6 +49,10 @@ struct channel {
     bool verbose() const noexcept { return verbose_; }
     void set_verbose(bool verbose) noexcept { verbose_ = verbose; }
 
+    // Mark this channel as failed: all future sends are dropped.
+    void fail() noexcept { failed_ = true; }
+    bool failed() const noexcept { return failed_; }
+
     // send a message on this channel
     cot::task<> send(message_type m);
 
@@ -57,6 +61,7 @@ private:
     id_type from_;
     port<T>& to_port_;
     bool verbose_;
+    bool failed_ = false;
     network<T>& net_;
 
     cot::clock::duration link_delay_ = 20ms; // time for message to arrive
@@ -118,6 +123,9 @@ private:
 
 template <typename T>
 cot::task<> channel<T>::send(message_type m) {
+    if (failed_) {
+        co_return;
+    }
     if (verbose_) {
         std::print("{}: {} → {} \"{}\"\n", cot::now(), source(), destination(),
                    message_traits_type::print_transform(m));
@@ -132,11 +140,20 @@ cot::task<> channel<T>::send(message_type m) {
 
 
 // channel<T>::send_after(delay, m)
-//    Delay for `delay`, then enqueue `m` on the destination port.
+//    Delay for `delay` (with added jitter), then enqueue `m` on the
+//    destination port.
 
 template <typename T>
-cot::task<> channel<T>::send_after(cot::clock::duration delay, message_type m) {
-    co_await cot::after(delay);
+cot::task<> channel<T>::send_after(cot::clock::duration base_delay, message_type m) {
+    // auto jitter = net_.exponential(100ms);
+    auto jitter = net_.uniform(0ms, 1000ms);
+    auto total_delay = base_delay + jitter;
+    const auto max_delay = cot::clock::duration(1min);
+    if (total_delay > max_delay) {
+        total_delay = max_delay;
+    }
+
+    co_await cot::after(total_delay);
 
     // record this message in the destination message queue
     to_port_.messageq_.emplace_back(std::move(m));
@@ -166,8 +183,15 @@ cot::task<T> port<T>::receive() {
                    message_traits_type::print_transform(m));
     }
 
-    // NB could also model receive_delay_, like `send()`’s send_delay_,
-    // but don’t bother in handout code
+    // Model variable computation/processing delay before the receiver
+    // continues execution. We draw a random delay and cap it to keep
+    // delays finite (satisfying the CT model assumptions).
+    auto compute_delay = net_.exponential(100ms);
+    const auto max_compute_delay = cot::clock::duration(1min);
+    if (compute_delay > max_compute_delay) {
+        compute_delay = max_compute_delay;
+    }
+    co_await cot::after(compute_delay);
 
     co_return m;
 }

@@ -10,6 +10,11 @@
 #include <getopt.h>
 #endif
 
+// ctweakfd.cc
+//    Variant of ctconsensus.cc with a weakened failure detector:
+//    occasionally uses a very long timeout, which can delay detection
+//    of failed leaders and break consensus.
+
 namespace cot = cotamer;
 using namespace std::chrono_literals;
 using namespace netsim;
@@ -81,10 +86,15 @@ private:
 
 
 // Return a failure detector for the server with ID `leader`.
-// The handout failure detector is a simple timeout.
+// This variant sometimes uses an excessively long timeout, which
+// can violate the Chandra-Toueg failure-detector assumptions.
 
 cot::event server::failure_detector(int leader) {
     (void) leader;
+    // 10% of the time, use a 15-minute timeout instead of 1.5s.
+    if (net_.coin_flip(0.2)) {
+        return cot::after(15min);
+    }
     return cot::after(1500ms);
 }
 
@@ -400,3 +410,4 @@ int main(int argc, char* argv[]) {
     }
     return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }
+

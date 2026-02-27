@@ -56,6 +56,12 @@ add_executable(ctconsensus
     ${GETOPT_WIN_SRCS}
 )
 
+add_executable(ctconsensus_weak_fd
+    ctconsensus_weak_fd.cc
+    $<TARGET_OBJECTS:Cotamer>
+    ${GETOPT_WIN_SRCS}
+)
+
 add_executable(ctstubborn
     ctstubborn.cc
     $<TARGET_OBJECTS:Cotamer>
